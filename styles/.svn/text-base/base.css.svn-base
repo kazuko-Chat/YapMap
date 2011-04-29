@@ -1,0 +1,167 @@
+body { 
+	margin: 0px;
+	padding: 0px;
+	font-family: Verdana;
+	font-size: 11px;
+	background-color: #49575C;
+	color: #96A5AA;
+}
+
+button{
+	background-color: transparent;
+	border: none;
+	vertical-align: middle;
+}
+
+a:link		{ color:#96A5AA; text-decoration:none; }
+a:visited	{ color:#96A5AA; text-decoration:none; }
+a:hover		{ color:white; text-decoration:underline; }
+a:active	{ color:white; text-decoration:underline; }
+
+ul{
+	padding-left: 20px;
+}
+
+#content{
+}
+
+#map_canvas { 
+	height:400px;
+}
+
+#header{
+	background-color: #092D2D;
+	text-align: right;
+	padding-right: 13px;
+	height: 60px;
+	padding-left: 0px;
+}
+#headerLogo{
+	float:left;
+	padding-top: 10px;
+}
+#joinButton{
+	margin-top: 18px;
+}
+
+
+#statusPanel{
+	color: #ccc;
+	padding: 1px;
+	margin: 0px;
+}
+
+#statusPanel ul{
+ 	list-style:none;
+ 	padding-top: 15px;
+ 	margin: 0px;
+}
+#statusPanel li{
+ 	display: inline;
+ 	padding: 0px 15px 0px 0px;
+ 	color: #96A5AA;
+ 	vertical-align: middle;
+}
+#status{
+	color: #fff !important;
+}
+
+
+
+
+
+
+#localCameraContainer{
+	min-width: 160px;
+	min-height: 120px;
+	border: 1px solid #77888C;
+	background-color: #536065;
+	clear: both;
+
+}
+
+#deviceManagerLink{
+	padding-top: 5px;
+}
+
+
+
+#streamsList li {
+	margin: 0px 5px 0px 5px;
+	min-height: 160px;
+	min-width: 160px;
+	float: left;
+	list-style:none;
+}
+.streamHolder{
+	/* background-color: #77888C; */
+	border: 1px solid #77888C;
+	background-color: #536065;
+	height: 120px;
+	width: 160px;
+	clear:both;
+}
+
+
+.streamName{
+	margin-top: 3px;
+	padding-left: 25px;
+}
+.localStreamName{
+	margin-top: 3px;
+	padding-left: 25px;
+	padding-bottom: 5px;
+}
+
+.streamLight{
+	float:left;
+	vertical-align: middle;
+	margin-bottom: 4px;
+}
+.shareURLTitle{
+	margin-top: 3px;
+	margin-bottom: 10px;
+}
+
+
+
+
+#subTitleBar{
+	font-size: 12px;
+	letter-spacing: 3px;
+	margin-top: 10px;
+	padding-left: 25px;
+}
+#roomURLText{
+	float: right;
+	font-size: 11px;
+	letter-spacing: 0px;
+	margin-right: 20px;
+}
+
+
+
+
+#sharePanel{
+	text-align: center;
+	height: 130px;
+	width: 135px;
+	margin-right: 20px;
+	margin-top: 37px;
+	float: right;
+	padding: 0px;
+	color:white;
+}
+#sharePanel Button{
+	/* padding-bottom: 10px; */
+}
+
+
+#sharePanel button{
+	padding: 0px 0px 5px 0px;
+	cursor: pointer;
+}
+
+
+
+

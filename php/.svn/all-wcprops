@@ -1,0 +1,29 @@
+K 25
+svn:wc:ra_dav:version-url
+V 35
+/yapmap/!svn/ver/2/trunk/source/php
+END
+location_by_connectionId.php
+K 25
+svn:wc:ra_dav:version-url
+V 64
+/yapmap/!svn/ver/2/trunk/source/php/location_by_connectionId.php
+END
+OpenTokSDK.php
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/yapmap/!svn/ver/2/trunk/source/php/OpenTokSDK.php
+END
+GetSession.php
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/yapmap/!svn/ver/2/trunk/source/php/GetSession.php
+END
+register_connection.php
+K 25
+svn:wc:ra_dav:version-url
+V 59
+/yapmap/!svn/ver/2/trunk/source/php/register_connection.php
+END

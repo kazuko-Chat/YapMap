@@ -1,0 +1,710 @@
+var baseURL = "http://"+window.location.hostname+"/";
+var maxParticipants = 4;			// max participants 2
+var theSessionId; 					// TokBox SessionID TODO: hook up to serverside API to make this dynamic. 1922f048b6cf0b1972819be108df8c5a9fd937a5
+var hasSessionProp = false;			// Flag to used in certain async processes
+var map; 							// reference to Google Map
+var connectionIDMarkers = new Array(); // associative array of Google Map marker objects added to map: key=connectionId
+var userNames = new Array();		// asscoiative array: key is connectionId
+var sessionToken = "";				// used for TokBox session.connect
+var thePartnerKey = ;  			// used for TokBox session.connect
+var theSession = null;				// TokBox session object
+var thePublisher = null;			// TokBox publisher object
+var myConnectionId;					// TokBox generated connection ID for browser instance
+var participants = 0;				// Number of paticipants in the call
+var watchers = 0;					// Number of users watching but not participating
+var debug = false; 					// ToxBox event alerting
+var $modal1;						// Reference to modal dialog that appears on startup
+var $modalConnecting;				// Reference to a modal dialog that states the app is connecting
+var $modalDeviceManager;
+var isPublishing = false;			// Is browser instance publishing video stream through 
+var localUserName = "YapMapper";	// This is captured in $modal1 ////TODO: Re-visit to see if this has changed
+var myLatLon; 						// google.maps.LatLng object: Geolocation for this browser instance
+var clipboard = null;				// ZeroClipboard reference - see initialize()
+var PUBLISHER_WIDTH = 160;			// video widget dimension
+var PUBLISHER_HEIGHT = 120;			// video widget dimension
+var SUBSCRIBER_WIDTH = 160;			// video widget dimension
+var SUBSCRIBER_HEIGHT = 120;		// video widget dimension
+var joinButton; 					// reference to the top right Join Button container
+var latLons = new Array();			// holds latlons of participants on the map; TODO: Is this still used????
+var deviceManager = null;
+var devicePanel = null;
+var publisher = null;
+var maxZoom = 10;
+var minZoom = 2;
+// Some HTML for dynamic insertion
+var copyOverState = "url(../images/copy-button-background-over.png) no-repeat;";
+var copyDownState = "url(../images/copy-button-background-down.png) no-repeat;";
+var copyUpState = "url(../images/copy-button-background.png) no-repeat;";
+var startButtonHTML = "<img src='images/start-participating-button.png' alt='start participating' />";
+var stopButtonHTML = "<img src='images/stop-participating-button.png' alt='stop participating'/>";
+var fullButtonHTML = "<img src='images/full-button.png' alt='stop participating'/>";
+var lights = new Array();
+lights[0] = "<img src='images/off.png' alt='stream off' width='20' height='20'/>";
+lights[1] = "<img src='images/1.png' alt='stream 1' width='20' height='20' />";
+lights[2] = "<img src='images/2.png' alt='stream 2' width='20' height='20' />";
+lights[3] = "<img src='images/5.png' alt='stream 3' width='20' height='20' />";
+lights[4] = "<img src='images/4.png' alt='stream 4' width='20' height='20' />";
+lights[5] = "<img src='images/3.png' alt='stream 5' width='20' height='20' />";
+
+// preload images
+var copyOverImage = new Image(232,22); 
+copyOverImage.src= baseURL + "images/copy-button-background-over.png"; 
+
+var copyDownImage = new Image(232,22); 
+copyOverImage.src= baseURL + "images/copy-button-background-down.png"; 
+
+
+//// TokBox stream container pool **********************************************************
+var	activeStreamContainers = new Array();//associative array with connectionId as the key
+var availableStreamContainers = new Array();
+var localUserStreamContainerObj;
+
+function getStreamContainerObj(connectionId){
+	var streamContainerObj;
+	if (availableStreamContainers.length > 0){ 
+		streamContainerObj = availableStreamContainers.shift();
+		streamContainerObj.connectionId = connectionId;
+		activeStreamContainers[connectionId] = streamContainerObj;
+	}
+	return streamContainerObj;	
+}
+
+function recycleStreamContainerObj(connectionId){
+	var streamConObj = activeStreamContainers[connectionId];
+	if (streamConObj){
+		availableStreamContainers.unshift(streamConObj);
+		streamConObj.connectionId = null;
+		streamConObj.label.innerHTML = "disconnected";
+		streamConObj.light.innerHTML = lights[0];
+		var streamContainer = streamConObj.stream;
+		//remove all the children from the stream div container
+		while (streamContainer.hasChildNodes()) {
+    		streamContainer.removeChild(streamContainer.lastChild);
+		}
+		delete activeStreamContainers[connectionId];
+	}
+	else{
+		//alert("failed to recycle stream container: " + connectionId);
+	}
+}
+
+
+
+
+
+
+//// INITIALIZE methods **********************************************************
+function initialize() {
+	showConnectingModal();
+	joinButton = $("#joinButton").get(0);
+	
+	// INITIALIZE map
+	var latlng = new google.maps.LatLng(38,-97);
+	var myOptions = { zoom: 4,center: latlng, mapTypeId: google.maps.MapTypeId.ROADMAP}
+	map = new google.maps.Map(document.getElementById("map_canvas"), myOptions);
+	google.maps.event.addListener(map,"bounds_changed", onMapBoundsChange);
+	
+	// FIRST attempt to get location
+	try{navigator.geolocation.getCurrentPosition(onW3CGeoLocation, onW3CGeoLocationError, {maximumAge:86400000, timeout:3000});} //24hours, 2 seconds	
+	catch(e){}
+	
+	// INITIALIZE clipboad copy stuff
+	clipboard = new ZeroClipboard.Client();
+	clipboard.setHandCursor(true); 
+	clipboard.addEventListener('mousedown', function (client) { clipboard.setText( $("#roomURL").get(0).innerHTML ); 
+																$("#copyURLButton").get(0).style.backgroundImage = "url(" + baseURL + "images/copy-button-background-down.png)"; });
+	clipboard.addEventListener('mouseover', function (client) { $("#copyURLButton").get(0).style.backgroundImage = "url(" + baseURL + "images/copy-button-background-over.png)"; });
+	clipboard.addEventListener('mouseup', function (client)   { $("#copyURLButton").get(0).style.backgroundImage = "url(" + baseURL + "images/copy-button-background-over.png)"; });
+	clipboard.addEventListener('mouseout', function (client)  { $("#copyURLButton").get(0).style.backgroundImage = "url(" + baseURL + "images/copy-button-background.png)"; });
+	clipboard.glue("copyURLButton");		
+	
+	// INITIALIZE the stream container pool
+	availableStreamContainers.push({index:1, stream:$("#stream_1").get(0), label:$("#stream_name_1").get(0), light:$("#stream_light_1").get(0), icon:"images/pin1.png"});
+	availableStreamContainers.push({index:2, stream:$("#stream_2").get(0), label:$("#stream_name_2").get(0), light:$("#stream_light_2").get(0), icon:"images/pin2.png"});
+	availableStreamContainers.push({index:3, stream:$("#stream_3").get(0), label:$("#stream_name_3").get(0), light:$("#stream_light_3").get(0), icon:"images/pin3.png"});
+	availableStreamContainers.push({index:4, stream:$("#stream_4").get(0), label:$("#stream_name_4").get(0), light:$("#stream_light_4").get(0), icon:"images/pin4.png"});
+	
+	theSessionId = getQueryVariable("id");
+	if (theSessionId) hasSessionProp = true;
+
+	// FETCH token (async)
+	$.post(baseURL + "php/GetSession.php", {sessionId:theSessionId},
+   		function(data){
+   			try{
+   				theSessionId = data.sessionId;
+   				sessionToken = data.token;
+   				initializeTB();
+   			}
+   			catch(e){
+   				alert("failed to initialize");
+   			}
+   		}, "json");	
+   		
+   		
+   		
+}
+
+function initializeTB(){
+	//// TokBox initialization
+	if (TB.checkSystemRequirements() != TB.HAS_REQUIREMENTS) {
+		alert("Minimum System Requirements not met!");
+	}
+	// Set debugging level. Displays to a div with id="tokbox_console"
+	//TB.setLogLevel(TB.DEBUG);
+	theSession = TB.initSession(theSessionId);
+	TB.addEventListener("exception", exceptionHandler);
+	theSession.addEventListener("sessionConnected", sessionConnectedHandler);
+	//theSession.addEventListener("sessionDisconnected", sessionDisconnectedHandler);
+	theSession.addEventListener("connectionCreated", connectionCreatedHandler);
+	theSession.addEventListener("connectionDestroyed", connectionDestroyedHandler);
+	theSession.addEventListener("streamCreated", streamCreatedHandler);
+	theSession.addEventListener("streamDestroyed", streamDestroyedHandler);	
+	// Connect to the session
+	theSession.connect(thePartnerKey, sessionToken);
+	$("#roomURL").get(0).innerHTML = baseURL + "?id=" + theSessionId; 
+}
+
+
+
+
+
+
+function onJoinClick(){
+	if(!isPublishing && isFull()){
+		return;
+	}
+	else if (isPublishing){
+		stopPublishing();
+	} 
+	else{
+		startPublishing();
+		//showJoinCallModal();
+	} 
+}
+function updateJoinButton(){
+	if (isFull() && !isPublishing){
+		joinButton.innerHTML = fullButtonHTML;
+	}
+	else if (isPublishing){
+		joinButton.innerHTML = stopButtonHTML;
+	}
+	else{
+		joinButton.innerHTML = startButtonHTML;
+	}
+}
+function isFull(){
+	return participants >= maxParticipants;
+}
+
+function onTweetButtonClick(){
+	window.open('http://twitter.com/share?url=' + baseURL + '/?id=' + theSessionId + '&via=tokbox&count=none&text=Come%20and%20join%20the%20conversation!');
+}
+
+
+
+
+
+
+function onW3CGeoLocation(position){
+	myLatLon = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
+}
+function onW3CGeoLocationError(error) {
+	// probably timed out. Success for this api is inconsistent at this time, but pretty accurate when it works.
+}
+
+
+
+
+
+//// METHODS for adding and removing map markers **********************************************************
+//// 
+function addMarkerByConnectionIDLatLot(p_connectionId, lat, lon){
+	//// ensures that duplicate markers are not added
+	if (!myLatLon) myLatLon = new google.maps.LatLng(lat,lon);
+	if (!connectionIDMarkers[p_connectionId]){
+		connectionIDMarkers[p_connectionId] = addMarker(myLatLon, userNames[p_connectionId], activeStreamContainers[p_connectionId].icon);
+		if (participants == 1) map.setCenter(myLatLon);
+		else updateMapBounds();	
+	}
+	else{
+		//alert("marker added for this location already: " + [p_connectionID, myConnectionId]);
+	}
+}
+
+function addMarkerByConnectionID(p_connectionId){
+	//// ensures that duplicate markers are not added
+	//// adding maker for this publisher is handled by addMarkerByConnectionIDLatLot()
+	if (!connectionIDMarkers[p_connectionId] && (p_connectionId != myConnectionId)){
+		//// TEMPORARY API CALL
+		$.post(baseURL + "php/location_by_connectionId.php", {session_id:theSessionId, connection_id:p_connectionId},
+   		function(data){
+   			var latLon = new google.maps.LatLng(data.latitude, data.longitude);
+   			connectionIDMarkers[p_connectionId] = addMarker(latLon, userNames[p_connectionId], activeStreamContainers[p_connectionId].icon);
+			if (participants == 1) map.setCenter(latLon);
+			else updateMapBounds();	
+   		}, "json");		
+	}
+	else{}
+}
+
+function removeMarkerByConnectionID(p_connectionID){
+	if (connectionIDMarkers[p_connectionID]){
+		connectionIDMarkers[p_connectionID].setMap(null); //// removes the marker
+		delete connectionIDMarkers[p_connectionID];
+		updateMapBounds();
+	}
+}
+
+//// PARAMS: Google LatLng object, string, url
+function addMarker(p_latlon, p_name, p_icon){
+	var iconImage = new google.maps.MarkerImage(p_icon,
+	// This marker dimension
+	new google.maps.Size(33, 38),
+	// The origin for this image is 0,0.
+	new google.maps.Point(0,0),
+	// The anchor 
+	new google.maps.Point(11, 38));
+	var marker = new google.maps.Marker({position:p_latlon, map:map, title:p_name, icon:iconImage});	
+	return marker;
+}  
+
+
+
+
+
+
+//// Update the bounds of the map after a marker is added or removed
+//   there is a convenience method for this but I never got around to 
+//   testing it when bounds get smaller.
+function updateMapBounds(){
+	var maxLat;
+	var minLat;
+	var maxLon;
+	var minLon;
+	for (var marker in connectionIDMarkers){
+		var ll = connectionIDMarkers[marker].getPosition();
+		if (!maxLat){
+			maxLat = ll.lat()
+			minLat = ll.lat()
+			maxLon = ll.lng()
+			minLon = ll.lng()
+		}
+		else{
+			maxLat = Math.max(ll.lat(), maxLat);
+			maxLon = Math.max(ll.lng(), maxLon);		
+			minLat = Math.min(ll.lat(), minLat);
+			minLon = Math.min(ll.lng(), minLon);
+		}
+	}
+	if (!maxLat) map.setCenter(new google.maps.LatLng(38,-97));
+	else{
+		var sw = new google.maps.LatLng(minLat, minLon);  
+		var ne = new google.maps.LatLng(maxLat, maxLon);  
+		map.fitBounds(new google.maps.LatLngBounds(sw, ne));
+		if(map.getZoom() > maxZoom){ map.setZoom(maxZoom);}
+		else if(map.getZoom() < minZoom){map.setZoom(minZoom);} 
+	}
+}
+
+function onMapBoundsChange(){
+	//logToYapMapCosole("map bounds changed");
+}
+
+
+
+
+//// METHOD to get query string value based on supplied key
+function getQueryVariable(variable) {
+	var query = window.location.search.substring(1);
+	var vars = query.split("&");
+	for (var i=0;i<vars.length;i++) {
+		var pair = vars[i].split("=");
+			if (pair[0] == variable) return pair[1];
+	}
+}
+
+
+
+
+
+//// METHOD to handle copy to clipboard feature
+function copy_to_clipboard(text){
+	if(window.clipboardData){
+		window.clipboardData.setData('text',text);
+	}
+	else{
+		var clipboarddiv=document.getElementById('divclipboardswf');  
+      	if(clipboarddiv==null){
+      		clipboarddiv=document.createElement('div');
+      		clipboarddiv.setAttribute("name", "divclipboardswf");
+      		clipboarddiv.setAttribute("id", "divclipboardswf");
+      		document.body.appendChild(clipboarddiv);  
+      	}
+      	clipboarddiv.innerHTML='<embed src="clipboard.swf" FlashVars="clipboard='+encodeURIComponent(text)+'" width="0" height="0" type="application/x-shockwave-flash"></embed>';  
+     }
+     //alert('The text is copied to your clipboard...');
+     return false;
+}
+
+
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//// METHODS for modal dialogs
+function showJoinCallModal(){
+	var modalButtons;
+	var wTitle = "Start YapMapping!";
+	var greeting = "Your name: ";
+	if (!isPublishing && isFull()){
+		modalButtons = { 	"Eavesdrop": function() {$(this).dialog("close");}}
+		htmlString = '<p>Sorry, the conversation is full.<br/> But you can still listen in!</p>';
+	}
+	else if (hasSessionProp){
+		modalButtons = { 	"Eavesdrop": function() {$(this).dialog("close");},
+							"Join the conversation":function() {$(this).dialog("close");startPublishing(); }
+						}
+		greeting = "The YapMap conversation has already started! <br/><br/>Your name:";
+		htmlString = '<p>' + greeting + '</p> <input type="text" id="modalNameInput" value="' + localUserName + '" name="userName" onChange="onModalNameChange(this)" style="width:270px;" />';
+	}
+	else {
+		modalButtons = {"Start a conversation": function() {$(this).dialog("close");startPublishing(); }}	
+		greeting = "Welcome to your private YapMap room! <br/><br/>Your name:";
+		htmlString = '<p>' + greeting + '</p> <input type="text" id="modalNameInput" value="' + localUserName + '" name="userName" onChange="onModalNameChange(this)" style="width:270px;" />';
+	}
+	
+	$modal1 = $('<div></div>')
+		.html(htmlString)
+		.dialog({
+			autoOpen: false,
+			modal: true,
+			title: wTitle,
+			buttons: modalButtons
+		});
+		$modal1.dialog('open');
+}
+
+function onModalNameChange(input){
+	localUserName = input.value;
+}
+
+function closeModal1(){
+	$modal1.dialog('close');
+}
+
+
+
+
+function showConnectingModal(){
+	$modalConnecting = $('<div></div>')
+		.html('<p>Connecting to TokBox server ...</p>')
+		.dialog({
+			autoOpen: false,
+			modal: true
+		});
+
+		$modalConnecting.dialog('open');
+
+}
+
+//// OPENS a modal window with the device manager in it
+function showDeviceManagerModal(){
+	$modalDeviceManager = $('<div></div>')
+		.html('<div id="deviceManagerContainer"></p>')
+		.dialog({
+			autoOpen: false,
+			height: 500,
+			width: 410,
+			title: "Device Manager",
+			modal: true,
+			resizable: false,
+			buttons: {"close": function() 	{
+												$(this).dialog("close");
+												if (devicePanel) deviceManager.removePanel(devicePanel);
+											}}
+		});
+
+		$modalDeviceManager.dialog('open');
+		
+		if (deviceManager == null) deviceManager = TB.initDeviceManager(thePartnerKey);
+		if (publisher) devicePanel = deviceManager.displayPanel("deviceManagerContainer", publisher);
+		else devicePanel = deviceManager.displayPanel("deviceManagerContainer");
+
+}
+
+
+
+
+
+
+// YAPMAP method
+// is called from streamCreatedHandler when this user is the one who created the stream
+// it registers the user geolocation with serverside so this information can be shared with other users in the session
+function registerLocation(p_sessionID, p_connectionID){
+	$.post(baseURL + "php/register_connection.php", { session_id: p_sessionID, connection_id: p_connectionID },
+   		function(data){
+      		userNames[p_connectionID] = localUserName;
+     		addMarkerByConnectionIDLatLot(p_connectionID, data.latitude, data.longitude);
+   		}, "json");
+}
+
+
+
+
+//// Not used at this time
+function logToYapMapCosole(content){
+	if (yapMapDebug){
+		var yapMapConsole = $("#yapmap_console").get(0);
+		yapMapConsole.innerHTML += "<p style='margin:0;color:white;'>" + content + "</p>";
+	}
+}
+
+
+
+
+
+
+
+////TOKBOX related methods *******************************************************************
+////******************************************************************************************
+
+// messages to a Javascript alert box 
+function exceptionHandler(e) {
+	alert("Exception: "+e.code+"::"+e.message);
+}
+
+// Generic function to dump streamEvents to the alert box
+function dumpStreams(streams, reason) {
+	for (var i=0; i<streams.length; i++) {
+		alert("streamID: "+streams[i].streamId + "\n" +
+			"connectionId: "+streams[i].connection.connectionId +" \n" +
+			"type: "+streams[i].type +"\n" +
+			"name: "+streams[i].name +"\n" +
+			"reason: "+reason);
+	}
+}
+
+// Generic function to dump connectionEvents to the alert box
+function dumpConnections(connections, reason) {
+	for (var i=0; i<connections.length; i++) {
+		alert("connectionId: "+connections[i].connectionId +" \n" +
+			"reason: "+reason);
+	}
+}
+
+
+
+// Action functions
+
+// Called when user wants to start participating in the call
+function startPublishing() {
+	if (!isFull()){
+		// Starts publishing user local camera and mic
+		// as a stream into the session
+		var streamContainerObj = getStreamContainerObj(myConnectionId); 
+		if (streamContainerObj){
+			localUserStreamContainerObj = streamContainerObj;
+			isPublishing = true; ////YAPMAP
+			var parentDiv =  streamContainerObj.stream
+			var stubDiv = document.createElement("div");
+			stubDiv.id = "tbx_publisher";
+			parentDiv.appendChild(stubDiv);
+			// TBD: failed silently when div ID didn't exist
+			thePublisher = theSession.publish(stubDiv.id, {width: PUBLISHER_WIDTH, height: PUBLISHER_HEIGHT, name:localUserName});
+			updateStatusText("Trying to join the call...");
+			updateJoinButton(); ////YAPMAP
+			streamContainerObj.label.innerHTML = localUserName; ////YAPMAP
+			streamContainerObj.light.innerHTML = lights[streamContainerObj.index]; ////YAPMAP
+		}
+	}
+}
+
+
+
+// Called when user wants to stop participating in the call
+function stopPublishing() {
+	isPublishing = false;
+	if (thePublisher != null) {
+		theSession.unpublish(thePublisher);
+		thePublisher = null;
+	}
+	if (localUserStreamContainerObj){
+		updateStatusText("Leaving the call...");
+		updateJoinButton(); ////YAPMAP
+		localUserStreamContainerObj.label.innerHTML = "Disconnected"; ////YAPMAP
+		localUserStreamContainerObj.light.innerHTML = lights[0]; ////YAPMAP
+		recycleStreamContainerObj(myConnectionId);
+		delete localUserStreamContainerObj;
+	}
+}
+
+// Called to subscribe to a new stream
+function subscribeToStream(session, stream) {
+	// Create a div for the subscribe widget to replace
+	var streamContainerObj = getStreamContainerObj(stream.connection.connectionId); ////YAPMAP
+	if (streamContainerObj){
+		var parentDiv = streamContainerObj.stream; ////YAPMAP
+		var stubDiv = document.createElement("div");
+		stubDiv.id = "tbx_subscriber_" + stream.streamId;
+		parentDiv.appendChild(stubDiv);
+		var labelDiv = streamContainerObj.label; ////YAPMAP
+		labelDiv.innerHTML = stream.name; ////YAPMAP
+		streamContainerObj.light.innerHTML = lights[streamContainerObj.index];
+		userNames[stream.connection.connectionId] = stream.name;
+		session.subscribe(stream, stubDiv.id, {width: SUBSCRIBER_WIDTH, height: SUBSCRIBER_HEIGHT});
+	}
+	participants++;
+}
+
+// Called to unsubscribe from an existing stream
+function unsubscribeFromStream(session, stream) {
+	var subscribers = session.getSubscribersForStream(stream);
+
+	for (var i=0; i<subscribers.length; i++) {
+		session.unsubscribe(subscribers[i]);
+		participants--;
+	}
+}
+
+// Called to update watcher / participant counts on screen
+function updateCountDisplays() {
+	//document.getElementById("count-header").innerHTML = "Users connected to this page:";
+	//document.getElementById("watchers").innerHTML = ((watchers == 0) ? "No" : watchers) + " watcher" + ((watchers != 1) ? "s" : "");
+	//document.getElementById("participants").innerHTML = ((participants == 0) ? "No" : participants) + " participant" + ((participants != 1) ? "s" : "");
+	updateJoinButton(); ////YAPMAP
+}
+
+
+// TOKBOX Handler functions
+function sessionConnectedHandler(e) {
+	// Note that we are included in connectionEvents
+	// We can know which one is us by comparing to e.target.connection.connectionId
+	
+	myConnectionId = e.target.connection.connectionId;	////YAPMAP		
+	var streamConnectionIds = {};
+	var streamConnections = 0; // Number of connections with a stream
+	if (debug) {
+		alert("sessionConnectedHandler");
+		dumpConnections(e.connections, "");
+		dumpStreams(e.streams, "");
+	}
+
+	// Now possible to join a call
+
+	updateStatusText("You are watching the call");
+
+	// Display streams on screen
+	for (var i=0; i<e.streams.length; i++) {
+		subscribeToStream(e.target, e.streams[i]);
+		// Track unique connectionIds
+
+		if (!streamConnectionIds.hasOwnProperty(e.streams[i].connection.connectionId)) {
+			addMarkerByConnectionID(e.streams[i].connection.connectionId); //// YAPMAP specific
+			streamConnectionIds[e.streams[i].connection.connectionId] = true;
+			streamConnections++;
+		}
+	}
+	watchers = e.connections.length - streamConnections;
+	updateCountDisplays();
+	$modalConnecting.dialog('close'); ////YAPMAP
+	showJoinCallModal(); ////YAPMAP
+}
+
+
+function connectionCreatedHandler(e) {
+	// Note that we will do not get a connectionCreated
+	// event for ourselves when we connect - that case
+	// is handled by the sessionConnected event
+
+	if (debug) {
+		alert("connectionCreatedHandler");
+		dumpConnections(e.connections, "");
+	}
+	watchers += e.connections.length;
+	updateCountDisplays();
+}
+
+
+function connectionDestroyedHandler(e) {
+	if (debug) {
+		alert("connectionDestroyedHandler");
+		dumpConnections(e.connections, e.reason);
+	}
+	watchers -= e.connections.length;
+	updateCountDisplays();
+}
+
+
+
+
+
+function streamCreatedHandler(e) {
+	if (debug) {
+		alert("streamCreatedHandler");
+		dumpStreams(e.streams, "");
+	}
+	// Display streams on screen.  Note that
+	// we will get a streamCreated event for ourselves
+	// when we successfully start publishing
+	for (var i=0; i<e.streams.length; i++) {
+		var conenctionID = e.streams[i].connection.connectionId; ////YAPMAP
+		if (e.streams[i].connection.connectionId != e.target.connection.connectionId) {
+			subscribeToStream(e.target, e.streams[i]);
+			addMarkerByConnectionID(e.streams[i].connection.connectionId); ////YAPMAP
+			watchers--;
+		} else {
+			// Our publisher just started streaming
+			// Update status, controls and counts
+			updateStatusText("You are participating in the call");
+			registerLocation(theSessionId, conenctionID); ////YAPMAP
+			participants++;
+			watchers--;
+		}
+	}
+	updateCountDisplays();
+}
+
+
+
+
+function streamDestroyedHandler(e) {
+	if (debug) {
+		alert("streamDestroyedHandler");
+		dumpStreams(e.streams, e.reason);
+	}
+	// Remove streams from screen.  Note that
+	// we will get a streamDestroyed event for ourselves
+	// when we successfully stop publishing
+
+	for (var i=0; i<e.streams.length; i++) {
+		if (e.streams[i].connection.connectionId != e.target.connection.connectionId) {
+			unsubscribeFromStream(e.target, e.streams[i]);
+			recycleStreamContainerObj(e.streams[i].connection.connectionId); ////YAPMAP
+			watchers++;
+		} else {
+			// Our publisher just stopped streaming
+			// Update status, controls and counts
+			updateStatusText("You are watching the call");
+			participants--;
+			watchers++;
+		}
+		removeMarkerByConnectionID(e.streams[i].connection.connectionId); ////YAPMAP
+	}
+
+	updateCountDisplays();
+}
+
+function updateStatusText(p_status){
+	//try { document.getElementById("status").innerHTML = p_status; }
+	//catch(e){}
+}
+
+
+
+
+
+
+
+
+
+
